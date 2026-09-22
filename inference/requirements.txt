@@ -1,0 +1,5 @@
+# Install CUDA PyTorch separately, then install these application dependencies.
+decider @ git+https://github.com/Mapika/decider.git@c4daaac28af9fea95d627015cffa2dd5a5926ee6
+fastapi>=0.115,<1
+uvicorn>=0.30,<1
+pillow>=11,<13

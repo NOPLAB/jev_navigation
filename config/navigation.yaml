@@ -1,0 +1,14 @@
+decision_node:
+  ros__parameters:
+    server_url: "http://127.0.0.1:8000"
+    goal: "Approach the red chair and stop before touching it."
+    dry_run: true
+    forward_speed: 0.10
+    turn_speed: 0.25
+    command_ttl: 0.8          # Seconds since source image; never extended by publishing.
+    request_timeout: 2.0
+    inference_interval: 0.2  # Maximum request frequency, not guaranteed inference speed.
+    publish_rate: 20.0
+    min_probability: 0.6     # Experimental action-selection threshold, not safety confidence.
+    min_margin: 0.15
+    image_max_side: 384
