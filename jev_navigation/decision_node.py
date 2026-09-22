@@ -33,8 +33,8 @@ class DecisionNode(Node):
             "request_timeout": 2.0,
             "inference_interval": 0.2,
             "publish_rate": 20.0,
-            "min_probability": 0.6,
-            "min_margin": 0.15,
+            "min_probability": 0.2,
+            "min_margin": 0.0,
             "image_max_side": 384,
         }
         for name, value in defaults.items():

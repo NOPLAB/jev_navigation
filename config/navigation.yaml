@@ -9,6 +9,6 @@ decision_node:
     request_timeout: 2.0
     inference_interval: 0.2  # Maximum request frequency, not guaranteed inference speed.
     publish_rate: 20.0
-    min_probability: 0.6     # Experimental action-selection threshold, not safety confidence.
-    min_margin: 0.15
+    min_probability: 0.2     # Experimental action-selection threshold, not safety confidence.
+    min_margin: 0.0
     image_max_side: 384

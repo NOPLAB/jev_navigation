@@ -134,6 +134,10 @@ language. Goal reaching is a model judgment, not an independently verified dista
 - `forward`: positive linear x; `left` / `right`: positive / negative angular z.
 - `stop`: zero velocity. `goal_reached`: zero velocity and disable until re-enabled.
 - Low maximum probability or a small top-two margin produces `stop`.
+- Defaults are `min_probability=0.2`, `min_margin=0.0`, and `command_ttl=0.8`
+  seconds from the source image. These permissive thresholds are not safety
+  confidence: a uniform five-way distribution can select `forward` because ties
+  follow action order. A highest-scoring `stop` still stops the robot.
 - Only one inference request is in flight. Pending camera images are replaced by newer ones.
 - The command lifetime starts at the source image time, not the response time.
   Publishing never renews it. Expired results, invalid timestamps/probabilities,

@@ -34,6 +34,9 @@ class ControlTest(unittest.TestCase):
         self.assertEqual(state.velocity(2.3, .1, .25, False), (0, 0))
 
     def test_uncertain_and_invalid_outputs(self):
+        self.assertEqual(choose_action(dict.fromkeys(ACTIONS, .2), .2, 0.0), "forward")
+        self.assertEqual(choose_action(dict(forward=.26, left=.17, right=.21,
+                                            stop=.28, goal_reached=.08), .2, 0.0), "stop")
         self.assertEqual(choose_action(probabilities(), .6, .15), "forward")
         self.assertEqual(choose_action(dict.fromkeys(ACTIONS, .2), .6, .15), "stop")
         values = dict.fromkeys(ACTIONS, 0.0)
