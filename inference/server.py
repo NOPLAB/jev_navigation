@@ -69,10 +69,16 @@ def create_app(model_path=None, device="cuda", dtype="bfloat16", temperature=1.0
             model = VisionDecisionModel(path, dtype=getattr(torch, dtype), grad_ckpt=False).to(device).eval()
 
             def predict(image, request):
-                context = (f"Goal: {request.goal}\nPrevious action: {request.previous_action}.\n"
+                context = (f"Goal: {request.goal}\n"
                            "The image is from a robot's forward-facing camera. "
-                           "Choose a short action. If uncertain or blocked, stop. "
-                           "Only select goal reached when the goal is already satisfied.")
+                           "Choose one brief action that makes progress toward the goal. "
+                           "Move forward when the nearby path ahead is visibly clear and advances the goal. "
+                           "Turn toward the goal or a visible clear route when a direction change is needed. "
+                           "If the target is outside the view, consider a turn to look for it; "
+                           "its absence alone is not a reason to stop. "
+                           "Stop when no immediate movement is clear of nearby obstacles, "
+                           "or the image is too unclear to assess the immediate path. "
+                           "Select goal reached only when the image shows the goal is already satisfied.")
                 example = Example(context, [Q(QUESTION, list(OPTIONS), 0)])
                 with torch.inference_mode():
                     inputs = model.prepare([(image, example)])

@@ -5,11 +5,11 @@ from dataclasses import dataclass
 
 ACTIONS = ("forward", "left", "right", "stop", "goal_reached")
 OPTIONS = (
-    "Move forward a short distance.",
-    "Rotate left in place a small amount.",
-    "Rotate right in place a small amount.",
-    "Stop because the view is unclear, the path is blocked, or no action is appropriate.",
-    "Stop because the goal has already been reached.",
+    "Move forward briefly along the clear path toward the goal.",
+    "Turn left briefly to face the goal or a clear path.",
+    "Turn right briefly to face the goal or a clear path.",
+    "Stop because immediate movement is obstructed or cannot be assessed.",
+    "Finish because the goal is visibly satisfied; remain stationary.",
 )
 QUESTION = "Which short action should the robot take next toward the goal?"
 
