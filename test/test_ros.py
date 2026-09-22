@@ -13,6 +13,7 @@ class RosTest(unittest.TestCase):
     def test_direct_velocity_and_stale_results(self):
         import rclpy
         from geometry_msgs.msg import Twist
+        from nav_msgs.msg import Odometry, Path
         from rclpy.executors import SingleThreadedExecutor
         from rclpy.node import Node
         from sensor_msgs.msg import Image
@@ -22,6 +23,7 @@ class RosTest(unittest.TestCase):
 
         class Handler(BaseHTTPRequestHandler):
             delay = 0.0
+            action = "forward"
 
             def log_message(self, *args):
                 pass
@@ -30,7 +32,7 @@ class RosTest(unittest.TestCase):
                 request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
                 time.sleep(Handler.delay)
                 body = json.dumps({"request_id": request["request_id"],
-                                   "probabilities": {a: float(a == "forward") for a in ACTIONS}}).encode()
+                                   "probabilities": {a: float(a == Handler.action) for a in ACTIONS}}).encode()
                 self.send_response(200)
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
@@ -43,6 +45,7 @@ class RosTest(unittest.TestCase):
                     "-p", f"server_url:=http://127.0.0.1:{server.server_port}",
                     "-p", "command_ttl:=0.5", "-r", "/cmd_vel:=/jev_test/cmd_vel",
                     "-r", "/camera/image_raw:=/jev_test/image",
+                    "-r", "/odom:=/jev_test/odom", "-r", "/jev/path:=/jev_test/path",
                     "-r", "/jev/enable:=/jev_test/enable", "-r", "/jev/status:=/jev_test/status"])
         node = DecisionNode()
         probe = Node("jev_test_probe")
@@ -50,9 +53,27 @@ class RosTest(unittest.TestCase):
         executor.add_node(node)
         executor.add_node(probe)
         received = []
+        commands, paths = [], []
         probe.create_subscription(Twist, "/jev_test/cmd_vel",
                                   lambda msg: received.append(msg.linear.x), 10)
+        probe.create_subscription(Twist, "/jev_test/cmd_vel", commands.append, 100)
+        probe.create_subscription(Path, "/jev_test/path", paths.append, 10)
         camera = probe.create_publisher(Image, "/jev_test/image", 10)
+        odometry = probe.create_publisher(Odometry, "/jev_test/odom", 10)
+        odom_enabled = True
+        pose_x = 0.0
+
+        def send_odom():
+            if odom_enabled:
+                msg = Odometry()
+                msg.header.stamp = probe.get_clock().now().to_msg()
+                msg.header.frame_id = "odom"
+                msg.child_frame_id = "base_link"
+                msg.pose.pose.position.x = pose_x
+                msg.pose.pose.orientation.w = 1.0
+                odometry.publish(msg)
+
+        probe.create_timer(.02, send_odom)
         enable = probe.create_client(SetBool, "/jev_test/enable")
 
         def spin(seconds):
@@ -98,6 +119,35 @@ class RosTest(unittest.TestCase):
             frame()
             spin(.35)
             self.assertTrue(any(received), "Fresh frame should restore motion")
+            self.assertTrue(any(path.poses and path.header.frame_id == "odom" for path in paths))
+            Handler.action = "right"
+            commands.clear()
+            frame()
+            spin(.3)
+            self.assertTrue(any(c.linear.x > 0 and c.angular.z < 0 for c in commands),
+                            "Curved path must move forward and turn simultaneously")
+            self.assertTrue(all(c.linear.x > 0 for c in commands),
+                            "Normal path switching must not inject zero linear velocity")
+            Handler.action = "stop"
+            frame()
+            spin(.2)
+            self.assertEqual(received[-1], 0.0, "Winning stop bypasses acceleration ramp")
+            Handler.action = "forward"
+            frame()
+            spin(.3)
+            odom_enabled = False
+            spin(.4)
+            self.assertFalse(node.motion.enabled, "Odometry loss must disable")
+            self.assertEqual(received[-1], 0.0)
+            odom_enabled = True
+            spin(.1)
+            set_enabled(True)
+            frame()
+            spin(.25)
+            pose_x = 2.0
+            spin(.1)
+            self.assertFalse(node.motion.enabled, "Odometry jump must disable")
+            self.assertEqual(received[-1], 0.0)
             set_enabled(False)
             spin(.1)
             self.assertEqual(received[-1], 0.0)

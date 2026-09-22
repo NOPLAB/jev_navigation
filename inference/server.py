@@ -29,7 +29,8 @@ class DecisionRequest(BaseModel):
     request_id: int = Field(ge=0)
     image_base64: str = Field(min_length=4, max_length=2_800_000)
     goal: str = Field(min_length=1, max_length=512)
-    previous_action: Literal["forward", "left", "right", "stop", "goal_reached"] = "stop"
+    previous_action: Literal["forward", "gentle_left", "gentle_right", "left", "right",
+                             "stop", "goal_reached"] = "stop"
 
 
 def decode_image(encoded):
@@ -71,10 +72,12 @@ def create_app(model_path=None, device="cuda", dtype="bfloat16", temperature=1.0
             def predict(image, request):
                 context = (f"Goal: {request.goal}\n"
                            "The image is from a robot's forward-facing camera. "
-                           "Choose one brief action that makes progress toward the goal. "
+                           "Choose a short local path that makes progress toward the goal. "
+                           "All moving paths travel forward; curves do not rotate in place. "
+                           "Gentle curves have a 1 meter radius; tighter curves have a 0.5 meter radius. "
                            "Move forward when the nearby path ahead is visibly clear and advances the goal. "
-                           "Turn toward the goal or a visible clear route when a direction change is needed. "
-                           "If the target is outside the view, consider a turn to look for it; "
+                           "Choose a curve toward the goal when its visible swept route is clear. "
+                           "If the target is outside the view, consider a clear curved route to look for it; "
                            "its absence alone is not a reason to stop. "
                            "Stop when no immediate movement is clear of nearby obstacles, "
                            "or the image is too unclear to assess the immediate path. "
@@ -106,7 +109,8 @@ def create_app(model_path=None, device="cuda", dtype="bfloat16", temperature=1.0
     @app.get("/health")
     def health():
         return {"ready": True, "model": model_path or MODEL_ID,
-                "revision": "local" if model_path else MODEL_REVISION}
+                "revision": "local" if model_path else MODEL_REVISION,
+                "candidates": list(ACTIONS)}
 
     @app.post("/decide")
     def decide(request: DecisionRequest):

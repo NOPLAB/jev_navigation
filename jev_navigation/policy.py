@@ -3,20 +3,24 @@
 import math
 from dataclasses import dataclass
 
-ACTIONS = ("forward", "left", "right", "stop", "goal_reached")
+CURVATURES = {"forward": 0.0, "gentle_left": 1.0, "gentle_right": -1.0,
+              "left": 2.0, "right": -2.0}
+ACTIONS = (*CURVATURES, "stop", "goal_reached")
 OPTIONS = (
-    "Move forward briefly along the clear path toward the goal.",
-    "Turn left briefly to face the goal or a clear path.",
-    "Turn right briefly to face the goal or a clear path.",
+    "Follow a short straight path forward toward the goal.",
+    "Follow a short gentle left curve forward toward the goal.",
+    "Follow a short gentle right curve forward toward the goal.",
+    "Follow a short tighter left curve forward toward the goal.",
+    "Follow a short tighter right curve forward toward the goal.",
     "Stop because immediate movement is obstructed or cannot be assessed.",
     "Finish because the goal is visibly satisfied; remain stationary.",
 )
-QUESTION = "Which short action should the robot take next toward the goal?"
+QUESTION = "Which short local path should the robot follow next toward the goal?"
 
 
 def validate_probabilities(values):
     if not isinstance(values, dict) or set(values) != set(ACTIONS):
-        raise ValueError("Response must contain exactly the five action probabilities")
+        raise ValueError("Response probabilities must match path candidates: " + ", ".join(ACTIONS))
     if any(type(p) not in (int, float) or not math.isfinite(p) or not 0 <= p <= 1
            for p in values.values()):
         raise ValueError("Probabilities must be finite numbers between zero and one")
@@ -25,12 +29,16 @@ def validate_probabilities(values):
     return values
 
 
-def choose_action(values, min_probability, min_margin):
+def choose_action(values, min_probability, min_margin, current="stop", switch_margin=0.0):
     values = validate_probabilities(values)
     ranked = sorted(ACTIONS, key=values.__getitem__, reverse=True)
     best, second = ranked[:2]
     if values[best] < min_probability or values[best] - values[second] < min_margin:
         return "stop"
+    # Only stabilize moving paths. Never suppress a winning stop/goal result.
+    if (best in CURVATURES and current in CURVATURES and values[current] >= min_probability
+            and values[best] - values[current] < switch_margin):
+        return current
     return best
 
 
@@ -64,13 +72,7 @@ class MotionState:
             self.action, self.deadline = action, deadline
         return True
 
-    def velocity(self, now, forward_speed, turn_speed, dry_run):
+    def active(self, now):
         if not self.enabled or now >= self.deadline:
             self.stop()
-        if dry_run:
-            return 0.0, 0.0
-        return {
-            "forward": (forward_speed, 0.0),
-            "left": (0.0, turn_speed),
-            "right": (0.0, -turn_speed),
-        }.get(self.action, (0.0, 0.0))
+        return self.action in CURVATURES

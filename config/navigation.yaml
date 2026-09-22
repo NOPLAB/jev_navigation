@@ -12,3 +12,16 @@ decision_node:
     min_probability: 0.2     # Experimental action-selection threshold, not safety confidence.
     min_margin: 0.0
     image_max_side: 384
+    path_length: 0.6         # Meters; fixed candidate radii are 1.0 m and 0.5 m.
+    lookahead: 0.2
+    path_tolerance: 0.04
+    max_path_error: 0.25
+    linear_acceleration: 0.2 # m/s^2; emergency stops bypass the ramp.
+    angular_acceleration: 0.8 # rad/s^2
+    switch_margin: 0.08     # Moving-path hysteresis only; never delays a winning stop.
+    odom_timeout: 0.3
+    pose_sync_tolerance: 0.1
+    odom_jump_distance: 0.5
+    odom_jump_angle: 0.7
+    odom_frame: "odom"
+    base_frame: "base_link"

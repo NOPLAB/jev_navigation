@@ -1,14 +1,15 @@
 # jev_navigation
 
-ROS 2 Humble visual action selection with `Mapika/decider-2b-vision`.
+ROS 2 Humble visual local-path selection with `Mapika/decider-2b-vision`.
 One ROS node sends camera images to one local inference server and publishes
 `geometry_msgs/Twist` directly to `/cmd_vel`. There is no command gate node,
 Nav2 integration, map, or navigation-specific model training.
 
 ```text
 /camera/image_raw -> decision_node <-> HTTP inference server
-                         |
-                         +-> /cmd_vel
+/odom ------------>      |
+                         +-> /cmd_vel (internal path follower)
+                         +-> /jev/path (nav_msgs/Path for visualization)
 ```
 
 Author: nop <noplab90@gmail.com>. Code license: BSD-3-Clause.
@@ -19,6 +20,7 @@ The upstream decider code and model retain their Apache-2.0 licenses.
 - Ubuntu 22.04 / ROS 2 Humble (including WSL 2).
 - `uv`, Git, an NVIDIA driver, and a CUDA-compatible PyTorch installation for inference.
 - A forward-facing camera publishing timestamped `sensor_msgs/Image` messages.
+- Timestamped `nav_msgs/Odometry` on `/odom`, recommended at 20 Hz or faster.
 - A differential-drive base accepting `geometry_msgs/Twist`, with its own command timeout.
 
 The BF16 model weights are approximately 4.1 GB. An RTX 3060 12 GB is a candidate,
@@ -76,7 +78,13 @@ example; this is not calibration for robot navigation.
 ```
 
 The response contains the same request ID, `inference_ms`, and a `probabilities`
-object with exactly `forward`, `left`, `right`, `stop`, and `goal_reached`.
+object with exactly `forward`, `gentle_left`, `gentle_right`, `left`, `right`,
+`stop`, and `goal_reached`. `previous_action` is accepted for the HTTP contract
+but is not included in the model prompt.
+
+**Upgrade note:** this is a seven-candidate API, incompatible with the old
+five-action server. Update both processes, rebuild the ROS package, and restart
+both the inference server and ROS node. `/health` lists the server's candidates.
 
 ## Build the ROS package
 
@@ -98,6 +106,18 @@ Default camera input is `/camera/image_raw`; remap it if needed:
 ```bash
 ros2 launch jev_navigation navigation.launch.py image_topic:=/camera/color/image_raw
 ```
+
+Use `odom_topic:=/your/odom` to remap odometry. In `config/navigation.yaml`,
+set `odom_frame` and `base_frame` to exactly match the odometry `header.frame_id`
+and `child_frame_id` (defaults: `odom`, `base_link`; some bases use `base_footprint`).
+No TF conversion is performed. The odometry pose must describe the drive base,
+with x forward and y left, on a planar surface. The camera must face along the
+base's forward axis; this is semantic path selection, not calibrated image-to-ground
+projection or a collision-checked planner.
+
+Fresh valid odometry is required even in dry run. Camera and odometry stamps
+must share the node's ROS clock. The closest buffered odometry pose within
+`pose_sync_tolerance=0.1` seconds anchors each candidate at image capture time.
 
 The node starts disabled and with `dry_run=true`. Enable camera decisions with:
 
@@ -129,26 +149,54 @@ custom YAML with `config:=/absolute/path/navigation.yaml`. The launch argument
 `dry_run` overrides the YAML value. English goals match the model's documented
 language. Goal reaching is a model judgment, not an independently verified distance.
 
-## Command behavior
+## Local paths and command behavior
 
-- `forward`: positive linear x; `left` / `right`: positive / negative angular z.
+The model selects one of five forward arcs; it does not generate coordinates.
+`forward` is straight, `gentle_left/right` have 1 m radius, and `left/right`
+have 0.5 m radius. Paths default to 0.6 m long (maximum configurable length 0.7 m).
+The same ROS node follows the selected odom-frame path with pure pursuit at 20 Hz.
+`lookahead=0.2` m is the tracking target distance; `forward_speed=0.1` m/s and
+`turn_speed=0.25` rad/s are velocity limits. Curves retain positive forward speed.
+
+Only valid fresh inference renews the 0.8 s image-based command lifetime. An
+unchanged candidate keeps its anchored path until less than two lookahead
+distances remain, then replans from the new image pose. This is a rolling local
+path, not authorization to finish 0.6 m after the camera or server stops.
+
+- All moving candidates have positive linear x; left/right curves add positive/negative angular z.
+- A competing moving candidate must exceed the current candidate by `switch_margin=0.08`
+  to switch, provided the current candidate still meets `min_probability`.
+  Hysteresis never overrides a winning `stop` or `goal_reached`.
+- Normal path changes preserve the velocity state and use acceleration limits
+  (`linear_acceleration=0.2` m/s², `angular_acceleration=0.8` rad/s²).
+  Stop decisions, disabling, expired commands, and faults bypass these ramps.
 - `stop`: zero velocity. `goal_reached`: zero velocity and disable until re-enabled.
 - Low maximum probability or a small top-two margin produces `stop`.
 - Defaults are `min_probability=0.2`, `min_margin=0.0`, and `command_ttl=0.8`
   seconds from the source image. These permissive thresholds are not safety
-  confidence: a uniform five-way distribution can select `forward` because ties
-  follow action order. A highest-scoring `stop` still stops the robot.
+  confidence. A uniform seven-way distribution stops because its maximum is
+  below 0.2. Above-threshold ties follow action order unless moving-path hysteresis applies.
 - Only one inference request is in flight. Pending camera images are replaced by newer ones.
 - The command lifetime starts at the source image time, not the response time.
   Publishing never renews it. Expired results, invalid timestamps/probabilities,
   HTTP failures, and inference errors cannot start motion.
 - Disable/re-enable invalidates outstanding results and requires a fresh camera frame.
+- Stale odometry (`odom_timeout=0.3` s), invalid poses/frames, backward stamps,
+  or pose jumps over `odom_jump_distance=0.5` m / `odom_jump_angle=0.7` rad per
+  sample stop and disable the node. Restore valid odometry, then explicitly re-enable.
+- A missing image-aligned pose stops motion. An untrackable path or endpoint
+  arrival also stops; a later valid decision may start a new path.
 - A steady-clock timer publishes at 20 Hz even while inference runs or ROS time pauses.
   A backwards ROS clock jump disables the node. Camera stamps must use the same
   ROS clock as the node; zero stamps and stamps >50 ms into the future are rejected.
 
 There is no `/scan` check or independent obstacle avoidance. Model probabilities
-are not collision probabilities. Configure the base driver's command timeout:
+are not collision probabilities. Curved paths are not checked against robot footprint,
+obstacles, or camera blind spots. Path selection does not guarantee collision freedom.
+There is no in-place rotation or reverse path in this version.
+Path following cannot fix competing `/cmd_vel` publishers: check
+`ros2 topic info /cmd_vel -v` and keep exactly one controlling publisher.
+Configure the base driver's command timeout:
 a crashed process cannot publish a stop. Begin with wheels lifted or simulation,
 then supervised low-speed trials with an independent emergency stop.
 
@@ -182,10 +230,11 @@ RUN_ROS_TESTS=1 python3 -m unittest discover -s test -p test_ros.py -v
 ```
 
 This uses ROS domain 173 and `/jev_test/*` topics, never the robot's `/cmd_vel`.
-It checks direct velocity publication, camera-loss stopping, expired inference,
-and disable/re-enable rejection of old results using a mock HTTP server.
+It checks direct velocity publication, curved forward motion without a zero-speed
+switch, path publication, stop decisions, odometry loss/jumps, camera-loss stopping,
+expired inference, and disable/re-enable rejection of old results using a mock HTTP server.
 
-Validated on WSL 2 Ubuntu 22.04 with ROS 2 Humble: three control/API tests
+Validated on WSL 2 Ubuntu 22.04 with ROS 2 Humble: four control/API tests
 (Python 3.11.16), one ROS/HTTP integration test (system Python 3.10.12),
 `colcon build --symlink-install`, and installed launch argument loading passed.
 Actual model loading, GPU inference, latency, and physical navigation remain untested.
@@ -198,6 +247,7 @@ decider code and model revisions are pinned.
 ```text
 jev_navigation/decision_node.py  ROS image/HTTP/velocity loop
 jev_navigation/policy.py         Action contract and command lifetime
+jev_navigation/path_tracking.py Arc generation, pure pursuit, and velocity ramps
 jev_navigation/client.py         Shared bounded HTTP client
 inference/server.py             Standalone vision inference server
 inference/requirements.txt      Upstream code pin and server dependencies

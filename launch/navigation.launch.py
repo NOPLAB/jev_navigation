@@ -14,10 +14,12 @@ def generate_launch_description():
         DeclareLaunchArgument("config", default_value=config),
         DeclareLaunchArgument("dry_run", default_value="true"),
         DeclareLaunchArgument("image_topic", default_value="/camera/image_raw"),
+        DeclareLaunchArgument("odom_topic", default_value="/odom"),
         DeclareLaunchArgument("cmd_vel_topic", default_value="/cmd_vel"),
         Node(package="jev_navigation", executable="decision_node", name="decision_node",
              output="screen", parameters=[LaunchConfiguration("config"), {
                  "dry_run": ParameterValue(LaunchConfiguration("dry_run"), value_type=bool)}],
              remappings=[("/camera/image_raw", LaunchConfiguration("image_topic")),
+                         ("/odom", LaunchConfiguration("odom_topic")),
                          ("/cmd_vel", LaunchConfiguration("cmd_vel_topic"))]),
     ])
